@@ -12,3 +12,6 @@ data/general/spatial-data/
 /PARK
 .RDataTmp
 .png
+**.DS_Store
+RCF_Testing
+data

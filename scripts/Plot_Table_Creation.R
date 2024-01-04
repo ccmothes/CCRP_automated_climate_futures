@@ -1,4 +1,8 @@
 # RSS_Plot_Table_Creation vxx.R
+# KW: Performs a bunch of functions on the climate data pulled from GridMET on 
+# KW: our AOI (currently a 0.01 dd radius around our water supply point).
+Gridmet <- read_csv(paste0(OutDir, "/", SiteName,"_historical.csv"))
+Future_all <- read.csv(paste0(OutDir, "/", SiteName,"_future.csv", sep = ''))
 
 ################################################## INITIALS ##################################################
 #Month and season names 
@@ -129,7 +133,7 @@ ALL_FUTURE<-Future_all
 Future_all = subset(Future_all, Year >= Yr - (Range/2) & Year <= (Yr + (Range/2)))
 
 #### Determine low-skill models
-low_skill_models = read.delim('./data/general/GCM_skill_by_region.txt',header=TRUE) %>%  #list from Rupp et al. 2016
+low_skill_models = read.delim('data/general/GCM_skill_by_region.txt',header=TRUE) %>%  #list from Rupp et al. 2016
   filter(
     if (region %in% Region) {
       Region == region
@@ -212,6 +216,7 @@ hd = c(ux,ly)
 pts <- Future_Means %>% filter(str_detect(GCM, paste(low_skill_models$GCM,collapse = '|'), negate = TRUE))
 
   #calc Euclidian dist of each point from corners
+# KW: "corners" being the extremes: ww, wd, hw, hd
 pts$WW.distance <- sqrt((pts$DeltaTavg - ww[1])^2 + (pts$DeltaPr - ww[2])^2)
 pts$WD.distance <- sqrt((pts$DeltaTavg - wd[1])^2 + (pts$DeltaPr - wd[2])^2)
 pts$HW.distance <- sqrt((pts$DeltaTavg - hw[1])^2 + (pts$DeltaPr - hw[2])^2)
@@ -222,12 +227,12 @@ pts %>% filter(CF == "Warm Dry") %>% slice(which.min(WD.distance)) %>% .$GCM -> 
 pts %>% filter(CF == "Hot Wet") %>% slice(which.min(HW.distance)) %>% .$GCM -> hw
 pts %>% filter(CF == "Hot Dry") %>% slice(which.min(HD.distance)) %>% .$GCM -> hd
 
-Future_Means %>% mutate(corners = ifelse(GCM == ww,"Warm Wet",
+Future_Means <- Future_Means %>% mutate(corners = ifelse(GCM == ww,"Warm Wet",
                                          ifelse(GCM == wd, "Warm Dry",
                                                 ifelse(GCM == hw, "Hot Wet",
-                                                       ifelse( GCM == hd, "Hot Dry",NA))))) -> Future_Means
+                                                       ifelse( GCM == hd, "Hot Dry",NA))))) # -> Future_Means
 
-FM <- Future_Means %>% select("GCM","DeltaPr","DeltaTavg") %>%  
+FM <- Future_Means %>% dplyr::select("GCM","DeltaPr","DeltaTavg") %>%  
   filter(str_detect(GCM, paste(low_skill_models$GCM,collapse = '|'), negate = TRUE)) %>% 
   remove_rownames %>% column_to_rownames(var="GCM") 
 CF_GCM = data.frame(GCM = Future_Means$GCM, CF = Future_Means$CF)
@@ -236,10 +241,10 @@ CF_GCM = data.frame(GCM = Future_Means$GCM, CF = Future_Means$CF)
 
 pca <- prcomp(FM, center = TRUE,scale. = TRUE) 
 
-ggsave("PCA-loadings.png", plot=autoplot(pca, data = FM, loadings = TRUE,label=TRUE),width = PlotWidth, height = PlotHeight, path = OutDir) 
+ggsave(paste0(OutDir, "/", SiteName, "_PCA-loadings.png"), plot=autoplot(pca, data = FM, loadings = TRUE,label=TRUE),width = PlotWidth, height = PlotHeight) 
 
 pca.df<-as.data.frame(pca$x) 
-write.csv(pca.df, paste0(OutDir, "PCA-loadings.csv"))
+write_csv(pca.df, paste0(OutDir, "/PCA-loadings.csv"))
 
 #Take the min/max of each of the PCs
 PCs <-rbind(data.frame(GCM = c(rownames(pca.df)[which.min(pca.df$PC1)],rownames(pca.df)[which.max(pca.df$PC1)]),PC="PC1"),
@@ -268,9 +273,10 @@ if(length(
     Future_Means$pca[which(Future_Means$GCM == ID.redundant.gcm(PCA))] = NA #Removes the GCM that is in redundant diagonal
   }
 }
-
-Future_Means %>% mutate(select = eval(parse(text=paste0("Future_Means$",Indiv_method)))) -> Future_Means
-Future_Means %>% drop_na(select) %>% select(c(GCM,CF)) -> WB_GCMs 
+# KW: Which climate models do we want to use... do we select by PCA or Corner method (i.e., whatever `Indiv_method` is 
+# KW: at the top of katie_wbm.R)
+Future_Means <- Future_Means %>% mutate(select = eval(parse(text=paste0("Future_Means$",Indiv_method))))
+WB_GCMs <- Future_Means %>% drop_na(select) %>% dplyr::select(c(GCM,CF))
 
 rm(lx,ux,ly,uy,ww,wd,hw,hd, pts, FM, pca,pca.df,PCs,diagonals,PCA) 
 
@@ -317,6 +323,7 @@ Baseline_all$RHmean<-(Baseline_all$RHmaxPct+Baseline_all$RHminPct)/2
 RHmean = aggregate(RHmean~Month+GCM+CF,Baseline_all,mean,na.rm=TRUE)
 VPD = aggregate(VPD~Month+GCM+CF,Baseline_all,mean,na.rm=TRUE)
 
+# KW: Gridmet historical monthly summaries, across all years
 H_Monthly<-Reduce(function(...)merge(...,all=T),list(Tmax,Tmin,Tmean,Precip,RHmean,VPD))
 rm(Tmax,Tmin,Tmean,Precip,RHmean,VPD)
 
@@ -330,6 +337,7 @@ Future_all$RHmean<-(Future_all$RHmaxPct+Future_all$RHminPct)/2
 RHmean = aggregate(RHmean~Month+GCM+CF,Future_all,mean,na.rm=TRUE)
 VPD= aggregate(VPD~Month+GCM+CF,Future_all,mean,na.rm=TRUE)
 
+# KW: Future monthly summaries, across all years
 F_Monthly<-Reduce(function(...)merge(...,all=T),list(Tmax,Tmin,Tmean,Precip,RHmean,VPD))
 rm(Tmax,Tmin,Tmean,Precip,RHmean,VPD)
 
@@ -372,6 +380,7 @@ Monthly<-rbind(H_MonMean,F_MonCF)
 Monthly$CF<-factor(Monthly$CF,levels = c(CFs_all,"Historical"))
 
 # Monthly delta
+# KW: difference between historical and predicted vals
 Monthly_delta<-F_MonCF
 for (i in 3:8){
   Monthly_delta[,i]<-F_MonCF[,i]-H_MonMean[,i][match(F_MonCF$Month,H_MonMean$Month)]
@@ -432,17 +441,17 @@ Baseline_all$PrecipOver1 = Baseline_all$PrcpIn > 1
 Baseline_all$PrecipOver2 = Baseline_all$PrcpIn > 2
 Baseline_all$FThaw = Baseline_all$TminF<28 & Baseline_all$TmaxF>34
 Baseline_all$TavgFOver41 = Baseline_all$TavgF>41 # 5 deg C
-Baseline_all %>% 
-  group_by(GCM, idx = cumsum(TavgFOver41 == 0L)) %>% 
+Baseline_all <- Baseline_all %>% 
+  dplyr::group_by(GCM, idx = cumsum(TavgFOver41 == 0L)) %>% 
   mutate(TavgFOver41_count = row_number()) %>% 
-  ungroup %>% 
-  select(-idx) -> Baseline_all
+  dplyr::ungroup() %>% 
+  dplyr::select(-idx)
 
-Baseline_all %>% 
-  group_by(GCM, idx = cumsum(TavgFOver41 == 1L)) %>% 
+Baseline_all <- Baseline_all %>% 
+  dplyr::group_by(GCM, idx = cumsum(TavgFOver41 == 1L)) %>% 
   mutate(N_TavgFOver41_count = row_number()) %>% 
-  ungroup %>% 
-  select(-idx) -> Baseline_all
+  dplyr::ungroup() %>% 
+  dplyr::select(-idx)
 Baseline_all$HI = heat_index(Baseline_all$TmaxF,Baseline_all$RHminPct)
 Baseline_all$HI.EC = Baseline_all$HI >89 & Baseline_all$HI <103
 Baseline_all$HI.Dan = Baseline_all$HI >102 & Baseline_all$HI < 124
@@ -469,17 +478,17 @@ Future_all$PrecipOver2 = Future_all$PrcpIn > 2
 Future_all$FThaw = Future_all$TminF<28 & Future_all$TmaxF>34
 Future_all$TavgFOver41 = Future_all$TavgF>41 # 5 deg C
 
-Future_all %>% 
-  group_by(GCM, idx = cumsum(TavgFOver41 == 0L)) %>% 
+Future_all <- Future_all %>% 
+  dplyr::group_by(GCM, idx = cumsum(TavgFOver41 == 0L)) %>% 
   mutate(TavgFOver41_count = row_number()) %>% 
-  ungroup %>% 
-  select(-idx) -> Future_all
+  dplyr::ungroup() %>% 
+  dplyr::select(-idx) 
 
-Future_all %>% 
-  group_by(GCM, idx = cumsum(TavgFOver41 == 1L)) %>% 
+Future_all <- Future_all %>% 
+  dplyr::group_by(GCM, idx = cumsum(TavgFOver41 == 1L)) %>% 
   mutate(N_TavgFOver41_count = row_number()) %>% 
-  ungroup %>% 
-  select(-idx) -> Future_all
+  dplyr::ungroup() %>% 
+  dplyr::select(-idx) 
 
 Future_all$HI = heat_index(Future_all$TmaxF,Future_all$RHminPct)
 Future_all$HI.EC = Future_all$HI >89 & Future_all$HI <103
@@ -487,38 +496,41 @@ Future_all$HI.Dan = Future_all$HI >102 & Future_all$HI < 124
 Future_all$Frost = Future_all$TavgFOver41 == TRUE & Future_all$TminF < 32
 
 #### Historical Dataframes aggregated by Year+GCM ###########
-H_annual <- Baseline_all %>% group_by(CF, GCM, Year) %>%
-  summarise_at(vars(PrcpIn,OverHotTemp, OverHighQ, Tmax99, UnderColdTemp,UnderLowQ,  
+H_annual <- Baseline_all %>% dplyr::group_by(CF, GCM, Year) %>%
+  dplyr::summarise_at(vars(PrcpIn,OverHotTemp, OverHighQ, Tmax99, UnderColdTemp,UnderLowQ,  
                     NoPrecip, NoPrecipLength, OverPrecip95, OverPrecip99, PrecipOver1, PrecipOver2,
                     FThaw, TavgFOver41,HI.EC,HI.Dan), sum)  
 
-Hmeans<-Baseline_all %>% group_by(CF, GCM, Year) %>%
-  summarise_at(vars(TmaxF,TminF,TavgF,RHmean),mean)
+Hmeans<-Baseline_all %>% dplyr::group_by(CF, GCM, Year) %>%
+  dplyr::summarise_at(vars(TmaxF,TminF,TavgF,RHmean),mean)
 H_annual<-merge(H_annual,Hmeans,by=c("CF","GCM","Year"), all=TRUE);rm(Hmeans)
 
 # Agrregate mean w/ temps only W months
-H.WinterTemp<- Baseline_all %>% group_by(CF, GCM, Year) %>% 
+H.WinterTemp<- Baseline_all %>% 
   filter(Month<3 | Month>11) %>% 
-  summarise(W.Temp=mean(TavgF)) 
+  dplyr::group_by(CF, GCM, Year) %>% 
+  #filter(Month<3 | Month>11) %>% 
+  dplyr::summarize(W.Temp=mean(TavgF)) 
 H_annual <- merge(H_annual,H.WinterTemp,by=c("CF","GCM","Year")); rm(H.WinterTemp)
+
 
 
 # # Further Growing Season Calculations
 Baseline_GS <- as.data.table(subset(Baseline_all,select=c(Year,CF,GCM,Julian,TavgFOver41_count,N_TavgFOver41_count,halfyr)))
 Baseline_GS[order("Date","GCM"),]
-Baseline_GU <- Baseline_GS %>% group_by(CF, GCM, Year) %>% 
+Baseline_GU <- Baseline_GS %>% dplyr::group_by(CF, GCM, Year) %>% 
   filter(TavgFOver41_count ==7, halfyr == 1) %>% 
   slice(1) %>% # takes the first occurrence if there is a tie
-  ungroup()
+  dplyr::ungroup()
 
-Baseline_SE <- Baseline_GS %>% group_by(CF, GCM, Year) %>% 
+Baseline_SE <- Baseline_GS %>% dplyr::group_by(CF, GCM, Year) %>% 
   filter(N_TavgFOver41_count ==6, halfyr == 2) %>% 
   slice(1) %>% # takes the first occurrence if there is a tie
-  ungroup()
+  dplyr::ungroup()
 Baseline_SE$"EndGrow"<-Baseline_SE$Julian - 6
 
-H<-Baseline_GU %>% group_by(CF, GCM, Year) %>%
-  summarise(BegGrow = mean(Julian))
+H<-Baseline_GU %>% dplyr::group_by(CF, GCM, Year) %>%
+  dplyr::summarise(BegGrow = mean(Julian))
 H<-merge(H,Baseline_SE[,c("CF","GCM","Year","EndGrow")],by=c("CF","GCM","Year"), all=TRUE)
 H$EndGrow[is.na(H$EndGrow)]<-365
 H$GrowLen<- H$EndGrow - H$BegGrow
@@ -526,62 +538,67 @@ H_annual<-merge(H_annual,H,by=c("CF","GCM","Year"), all=TRUE)
 rm(Baseline_GS,Baseline_GU,Baseline_SE,H)
 
 # Frost length calculations - late spring freeze events
-Sp.Frost<-Baseline_all %>% group_by(CF, GCM, Year) %>%
+Sp.Frost<-Baseline_all %>% dplyr::group_by(CF, GCM, Year) %>%
   filter(Julian < 180) %>% 
-  summarise(Sp.Frost = sum(Frost))
+  dplyr::summarise(Sp.Frost = sum(Frost))
 H_annual<-merge(H_annual,Sp.Frost,by=c("CF","GCM","Year"), all=TRUE);rm(Sp.Frost)
 
 
 
 #### Future Dataframes aggregated by Year+GCM ###########
-F_annual <- Future_all %>% group_by(CF, GCM, Year) %>%
-  summarise_at(vars(PrcpIn,OverHotTemp, OverHighQ, Tmax99, UnderColdTemp,UnderLowQ,  
+F_annual <- Future_all %>% dplyr::group_by(CF, GCM, Year) %>%
+  dplyr::summarise_at(vars(PrcpIn,OverHotTemp, OverHighQ, Tmax99, UnderColdTemp,UnderLowQ,  
                     NoPrecip, NoPrecipLength, OverPrecip95, OverPrecip99, PrecipOver1, PrecipOver2,
                     FThaw, TavgFOver41,HI.EC,HI.Dan), sum)  
   
-Fmeans<-Future_all %>% group_by(CF, GCM, Year) %>%
-  summarise_at(vars(TmaxF,TminF,TavgF,RHmean),mean)
+Fmeans<-Future_all %>% dplyr::group_by(CF, GCM, Year) %>%
+  dplyr::summarise_at(vars(TmaxF,TminF,TavgF,RHmean),mean)
 F_annual<-merge(F_annual,Fmeans,by=c("CF","GCM","Year"), all=TRUE);rm(Fmeans)
 
 # Agrregate mean w/ temps only W months
-F.WinterTemp<- Future_all %>% group_by(CF, GCM, Year) %>% 
+F.WinterTemp<- Future_all %>% dplyr::group_by(CF, GCM, Year) %>% 
   filter(Month<3 | Month>11) %>% 
-  summarise(W.Temp=mean(TavgF)) 
+  dplyr::summarise(W.Temp=mean(TavgF)) 
 F_annual <- merge(F_annual,F.WinterTemp,by=c("CF","GCM","Year")); rm(F.WinterTemp)
 
 
 # # Further Growing Season Calculations
 Future_GS <- as.data.table(subset(Future_all,select=c(Year,CF,GCM,Julian,TavgFOver41_count,N_TavgFOver41_count,halfyr)))
 Future_GS[order("Date","GCM"),]
-Future_GU <- Future_GS %>% group_by(CF, GCM, Year) %>% 
+Future_GU <- Future_GS %>%
+  dplyr::group_by(CF, GCM, Year) %>% 
   filter(TavgFOver41_count ==7, halfyr == 1) %>% 
   slice(1) %>% # takes the first occurrence if there is a tie
-  ungroup()
+  dplyr::ungroup()
 
-Future_SE <- Future_GS %>% group_by(CF, GCM, Year) %>% 
+
+# KW: Creates an empty object. Is this correct? What's going on?
+Future_SE <- Future_GS %>% dplyr::group_by(CF, GCM, Year) %>% 
   filter(N_TavgFOver41_count ==6, halfyr == 2) %>% 
   slice(1) %>% # takes the first occurrence if there is a tie
-  ungroup()
+  dplyr::ungroup()
 Future_SE$"EndGrow"<-Future_SE$Julian - 6
 
-F<-Future_GU %>% group_by(CF, GCM, Year) %>%
-  summarise(BegGrow = mean(Julian))
-F<-merge(F,Future_SE[,c("CF","GCM","Year","EndGrow")],by=c("CF","GCM","Year"), all=TRUE)
+F<- Future_GU %>% dplyr::group_by(CF, GCM, Year) %>%
+  dplyr::summarise(BegGrow = mean(Julian)) %>%
+  # KW: added since Future_SE object is empty... 
+  mutate(EndGrow = NA)
+try(F<-merge(F,Future_SE[,c("CF","GCM","Year","EndGrow")],by=c("CF","GCM","Year"), all=TRUE))
 F$EndGrow[is.na(F$EndGrow)]<-365
 F$GrowLen<- F$EndGrow - F$BegGrow
 F_annual<-merge(F_annual,F,by=c("CF","GCM","Year"), all=TRUE)
 rm(Future_GS,Future_GU,Future_SE,F)
 
 # Frost length calculations - late spring freeze events
-Sp.Frost<-Future_all %>% group_by(CF, GCM, Year) %>%
+Sp.Frost<-Future_all %>% dplyr::group_by(CF, GCM, Year) %>%
   filter(Julian < 180) %>% 
-  summarise(Sp.Frost = sum(Frost))
+  dplyr::summarise(Sp.Frost = sum(Frost))
 F_annual<-merge(F_annual,Sp.Frost,by=c("CF","GCM","Year"), all=TRUE);rm(Sp.Frost)
 
 
 ######################################## END THRESHOLD CALCULATIONS ##############################
-write.csv(Future_Means, paste0(DataDir,SiteID,"_Future_Means.csv"),row.names = F)
+write.csv(Future_Means, paste0(DataDir,"/",SiteID,"_Future_Means.csv"),row.names = F)
 ##### Save Current workspace environment
-save.image(sprintf(paste0(DataDir,"Final_Environment.RData")))
+save.image(sprintf(paste0(DataDir,"/","Final_Environment.RData")))
 
 #  EOF
